@@ -10,7 +10,7 @@ Go over some common workflows relevant to members of the group. In particular...
 * A (slightly more advanced) discussion of interpolation and cross validation
 
 ## Resources
-* lets try using [Etherpad](http://etherpad.org/), a tool for collaborative note-taking, during the presentation. Click on the link [here]( insert_url ), to post comments, notes, and questions throughout the session. The resulting document will be posted permanently for future reference.
+* lets try using [Etherpad](http://etherpad.org/), a tool for collaborative note-taking, during the presentation. Click on the link [here]( insert_url ), to post comments, notes, and questions throughout the session. 
 * Data used for the examples are hosted in this repository. The zipped file contains the following:
     - `dem.tif` : an elevation raster for Hawaii
     - `stations.csv`: a csv of climate stations and locations with monthly rainfall
