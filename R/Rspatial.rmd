@@ -1,0 +1,398 @@
+---
+title: "Spatial Data in R: A fast and loose introduction"
+author: '  Steve Fick  '
+date: '  June 29th 2016  '
+output:
+  html_document:
+    number_sections: no
+    theme: readable
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+Some Notes for working with spatial data in R
+SEI R-users group 6-29-2016
+
+The Rmarkdown file and data used to generate this page is stored on [github](https://github.com/fickse/RSpatial_6-29)
+
+## Goals 
+Go over some common workflows relevant to members of the group. In particular...  
+
+* Getting Data in -- importing data from common GIS formats `.shp` and `.tif`
+* Basic manipulations -- projecting, extracting, cropping, overlay
+* Visualization -- some tips and tricks for interacting with data
+* A (slightly more advanced) discussion of interpolation and cross validation
+
+## Resources
+* lets try using [Etherpad](http://etherpad.org/), a tool for collaborative note-taking, during the presentation. Click on the link [here](expired_url), to post comments, notes, and questions throughout the session. 
+* Data used for the examples are hosted in this repository. The zipped file contains the following:
+    - `dem.tif` : an elevation raster for Hawaii
+    - `stations.csv`: a csv of climate stations and locations with monthly rainfall
+    - `watersheds.shp`: a shapefile of polygons with level 12 watersheds.
+You can download/unzip the data by hand or run the following code to download and unzip the data to a temporary directory
+
+```{r eval = FALSE}
+setwd( tempdir() )  # set working directory to temporary directory 
+download.file("https://github.com/fickse/RSpatial_6-29/raw/master/data/spdata.zip", destfile = 'spdata.zip')
+unzip( 'spdata.zip' , exdir = '.')
+```
+
+# 0. Prerequisites
+Most of the functions we will use come from the `raster` package. Raster provides some 'high-level' interface to spatial data. Also `maps` comes in handy for quick visualization. You can download these packages with...
+
+```{r eval=FALSE}
+install.packages('raster', repos = "http://cran.cnr.berkeley.edu/")
+```
+
+# 1. Get the data in
+
+```{r}
+library(raster)
+library(maps)
+```
+
+## Loading a raster
+```{r}
+dem <- raster('dem.tif')
+```
+that was easy!
+
+as a side note, raster has a useful function `getData` for downloading commonly used geophysical data including elevation, climate and geopolitical boundaries. The previous dataset could have been loaded with the following:
+
+```{r eval = FALSE}
+dem <- getData('alt', country = 'USA')[[4]] # the [[4]] selects the 4th item in the list, which is Hawaii
+```
+
+## Loading a shapefile
+```{r}
+w <- shapefile('watersheds.shp')
+```
+also easy!
+
+## Loading points from a csv file
+```{r}
+d <- read.csv('stations.csv')
+
+# make d into a SpatialPointsDataFrame
+coordinates(d) <- d[,c('lon','lat')]
+
+```
+
+# 2. Visualizations and interaction
+
+## basic plotting
+```{r}
+plot(dem)
+```
+
+```{r}
+plot(w)
+```
+
+```{r}
+plot(d)
+```
+
+
+## overlaying and coloring
+```{r}
+plot(dem, col = rainbow(10, alpha = .7))
+plot(d, add = TRUE, col = 'red', cex = .2)
+
+plot(w, col = 1:nrow(w))
+
+```
+
+
+## zoom 
+```{r eval = FALSE}
+?zoom # make sure to set (new = FALSE) if using Rstudio
+```
+
+## drawExtent and crop
+
+If we wanted a new raster that only contained the big island (hawaii), we here's one way to do it
+```{r eval = FALSE}
+e <- drawExtent()  # interactively draw a bounding box
+bigIsland <- crop(w, e) # use the box to crop spatial element
+```
+
+
+## click
+```{r eval = FALSE}
+?click
+click(d)
+click(dem)
+```
+
+The following will not turn out well ...
+
+```{r}
+plot(w)
+plot(d, add = TRUE, col = 'red', cex = .2)
+```
+
+... Where are the stations?!
+
+#3. Manipulations
+## reprojection
+
+Raster provides a nice function to interface with projections.
+```{r}
+projection(dem)
+projection(w)
+projection(d)
+```
+
+All of the projections are different! Since it is computationally time consuming and generally not ideal to reproject a raster, lets convert the polygons and points to the dem projection...
+
+```{r}
+w <- spTransform(w, projection(dem))
+w <- spTransform(w, projection(dem))
+
+```
+
+We know that our station points are in Lon Lat -- probably WGS 84. lets quickly double check by plotting
+```{r}
+plot(w)
+points(d, col = 'red')
+```
+
+Ok most points line up with the boundaries -- some are clearly errors.
+
+```{r}
+projection(d) <- projection(dem)
+```
+
+## Extracting raster information from points
+
+Lets run a quick quality check on our stations
+
+```{r}
+elev <- extract(dem, d)
+plot(elev, d$elev)
+```
+
+wow some of these stations are way off! lets find points that are > 300 m off of their expected value, or are located in the water
+
+```{r}
+iffyElev <- which(abs(d$elev-elev) > 300 )
+inWater <- which(is.na(elev))
+bad <- c(iffyElev, inWater)
+
+plot(elev, d$elev)
+points(elev[bad],d$elev[bad], col = 'red', cex = 2)
+
+plot(w)
+points(d[bad,], col = 'red', cex = 1, pch = 16)
+
+# permanently remove 
+d <- d[-bad,]
+
+# also remove any duplicates
+
+d <- d[ -which( duplicated( coordinates( d))), ]
+```
+
+
+## Calculate slope and or aspect
+
+```{r}
+slope <- terrain(dem, opt = 'slope', unit = 'degrees' )
+aspect <- terrain(dem, opt = 'aspect', unit = 'degrees')
+```
+
+## Extracting raster information from polygons
+
+```{r}
+avg_slope <- extract(slope, w, fun = mean, na.rm = TRUE)
+w$slope <- avg_slope
+
+#plot it
+colors <- rev(heat.colors(6))
+breaks <- quantile(avg_slope) 
+
+plot(w, col = colors[cut(w$slope, breaks)] , main = 'average slope per watershed')
+legend('topright', fill = colors, legend = round(breaks))
+
+```
+
+## Extracting polygon information from points
+
+Which watersheds don't have any stations?
+```{r}
+pinfo <- over(d, w)
+no_stat <- is.na(pinfo[,1])
+plot(w, col = c('white', 'red')[ no_stat + 1] )
+
+```
+
+## Extracting point information from polygons
+
+Which watershed has the most stations?
+```{r}
+s.info <- over(w,d, returnList = TRUE) # return a list of station info, by polgyon
+
+n.stations <- sapply(s.info , function(x) nrow(x))
+
+most <- which.max(n.stations)
+
+plot(w)
+plot(w[most,], col = 'blue', add=TRUE)
+
+```
+
+
+## Subsetting raster data
+
+plot all areas with elevation above 1000 m and less than 3000 m
+```{r}
+mask <- dem > 1000 & dem < 3000
+plot (mask)
+masked <-  mask(dem, mask, maskvalue = 0)
+plot(masked)
+
+```
+
+## setting some raster values to NA
+
+```{r}
+length(dem[]) # you can access raster values as a vector with [] - slow for big rasters tho!
+ncell(dem)
+dummy <- dem
+dummy[dummy[] > 1000] <- NA
+plot(dummy)
+```
+
+# 4. Interpolation Excercise
+
+Interpolation is the process of estimating values of a 'field' (continuous surface) using values at known locations.
+
+Essentially all spatial interpolation methods are based on Tobler's first law of geography, which states that 
+
+> "everything is related to everything else, but near things are more related than distant things"
+
+
+
+Statistical interpolations are often used for creating climate surfaces based on climate station values.
+
+The merits of an interpolation are best evaluated by *cross validation*, that is leaving a portion of data out during model fitting, then comparing predicted results to witheld data. 
+
+
+Lets try interpolating rainfall following the methods outlined in the helpfile for `raster::interpolate`
+
+```{r} 
+# aggregate to total average yearly rainfall -- this is what we'll interpolate
+
+y <- rowSums(d@data[, month.abb ])
+d$y <-y
+
+# define cross validation groups by randomly subsetting input data. Ideally this process should also take into account distance between witheld data and data used for interpolation -- if they are too near each other our cross validation estimates may appear artificially more accurate. 
+
+# we'll withold 20 percent. 
+test <- sample(1:nrow(d), round (nrow(d) * .2))
+
+```
+
+### Inverse Distance Weighting (IDW)
+Inverse distance weighting finds the expected value in a location based on taking a spatially weighted average of neighboring known points. Points that are closer get higher weight.
+
+```{r} 
+library(gstat)
+  # fit
+  mg <- gstat( id = 'y', formula = y~1, data = d[-test,], nmax = 7, set = list(idp = .5))
+
+  #interpolate
+  idw.r <- interpolate(dem, mg)
+  idw.r <- mask(idw.r, dem)
+  plot(idw.r, main = 'IDW')
+
+  #evaluate
+  idw.p <- predict(mg, d[test,])
+  plot( y[test], idw.p$y.pred, xlab = 'observed', ylab = 'predicted');abline(0,1)
+  idw.r2 <- round(cor(idw.p$y.pred, y[test])^2,2)
+  text(1000,4000, paste0('R2 :', idw.r2 ))
+
+
+```
+
+
+###Thin Plate Splines
+First method: *Thin plate spline*. What splines do is try to fit a smooth line that is both close to the data (accurate) and smooth (not-overfit). A tuning parameter "lambda"" determines how smooth or 'wiggly' the line is, and lambda is optimized by an algorithm.
+Example:
+```{r}
+library(fields)
+
+noisy_data <- data.frame( y = rnorm(100) +cos(seq(0,10, length.out = 100)), x = seq(0,10,length.out = 100))
+plot(y~ x, data = noisy_data)
+
+
+#over fit: lambda = 0 -- perfect fit to data but not generalizable
+over.fit = Tps(noisy_data$x, noisy_data$y, lambda = 0)
+lines( noisy_data$x,predict(over.fit), col = 'red')
+
+#under fit: lambda = 1 -- overly generalized (defaults to linear regression)
+under.fit = Tps(noisy_data$x, noisy_data$y, lambda = 1e12)
+lines( noisy_data$x,predict(under.fit), col = 'blue')
+
+#optimized -
+optimized <- Tps(noisy_data$x, noisy_data$y)
+lines( noisy_data$x,predict(optimized), col = 'dark green')
+```
+
+For our data, expanded into three dimensions (lat, lon, elevation)
+
+```{r}
+  train <- d@data[-test,]
+  testdat <- d@data[test,]
+
+  # fit
+  tps <- Tps( train[, c('lon','lat', 'elev')], train$y)
+
+  # interpolate
+  tps.r <- interpolate(dem, tps, xyOnly = FALSE)
+  plot(tps.r, main='TPS')
+  
+  # evaluate accuracy
+  tps.p <- predict(tps, x = testdat[,c('lon','lat','elev')])
+  plot( y[test], tps.p, xlab = 'observed', ylab = 'predicted');abline(0,1)
+  tps.r2 <- round( cor(tps.p, y[test])^2 , 2)
+  text(1000, 4000, paste0('R2: ', tps.r2))
+  
+
+```
+
+
+### Kriging
+
+Kriging is essentially IDW, except with the weights determined empirically from the data. One plots the average disimilarity between points as a function of distance (a semivariogram), then uses this information to determine how neighboring stations should be weighted.
+
+Universal kriging incorporates linear covariates along with the semivariance function.
+```{r}
+  v <- variogram( y ~ 1, data = d[-test,]  )
+  plot(v)
+  # this semi variogram does not appear to easily fit the mold
+  mu <- fit.variogram(v,vgm(1, "Sph", 300, 1))
+  gUK <- gstat(NULL, "y", y ~ elev, d[-test,], model = mu)
+
+  # interpolate
+  names(dem) <- 'elev'
+  UK <- interpolate(dem, gUK, xyOnly = FALSE)
+  plot(UK, main = "Universal Kriging")  
+
+  #evaluate
+  UK.p <- predict(gUK, d[test,])
+  plot( y[test], UK.p$y.pred, xlab = 'observed', ylab = 'predicted');abline(0,1)
+  UK.r2 <- round( cor(UK.p$y.pred, y[test])^2 , 2)
+  text(1000, 4000, paste0('R2: ', tps.r2))
+
+```
+
+# Further Reading
+
+[raster vignette](https://cran.r-project.org/web/packages/raster/vignettes/Raster.pdf) For a quick intro to manipulating raster data, including stacks and bricks
+[this excellent github site](https://pakillo.github.io/R-GIS-tutorial/) for using R as GIS
+
+
+
