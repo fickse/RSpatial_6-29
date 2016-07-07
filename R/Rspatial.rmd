@@ -1,6 +1,6 @@
 ---
 title: "Spatial Data in R: A fast and loose introduction"
-author: '  Steve Fick  '
+author: '  Steve Fick  :neckbeard: '
 date: '  June 29th 2016  '
 output:
   html_document:
